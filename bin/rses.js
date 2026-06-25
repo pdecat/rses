@@ -363,7 +363,7 @@ async function resolveAndBuildAsync(source, id, opts) {
   }
 
   parsed.turns = parsed.turns.slice(-turns * 2)
-  return buildHandoff(source, parsed)
+  return { handoff: buildHandoff(source, parsed), cwd: parsed.cwd || null }
 }
 
 function resolveAndBuild(source, id, opts) {
@@ -414,7 +414,7 @@ async function runHandoff(target, source, id, opts) {
     process.exit(1)
   }
 
-  const handoff = await resolveAndBuildAsync(source, id, opts)
+  const { handoff, cwd } = await resolveAndBuildAsync(source, id, opts)
   if (!handoff) return
 
   if (opts.dryRun) {
@@ -423,7 +423,7 @@ async function runHandoff(target, source, id, opts) {
   }
 
   printLaunchSummary(handoff, target)
-  launchWithHandoff(target, handoff, null, opts.passthrough || [])
+  launchWithHandoff(target, handoff, cwd, opts.passthrough || [])
 }
 
 // ── Unified picker (`rses` with no target/source) ────────────────────────────
@@ -510,12 +510,12 @@ async function runBrowse(opts) {
   if (!choice) { console.error('Cancelled.'); process.exit(0) }
 
   if (choice.kind === 'native') {
-    launchNative(choice.tool, NATIVE_RESUME[source](selected.ref), selected.ref.cwd)
+    launchNative(choice.tool, NATIVE_RESUME[source](selected.ref), selected.cwd || selected.ref.cwd || null)
     return
   }
 
   const handoff = buildFromRef(source, selected.ref, turns)
   if (!handoff) { console.error('Could not build handoff.'); process.exit(1) }
   printLaunchSummary(handoff, choice.tool)
-  launchWithHandoff(choice.tool, handoff, null, [])
+  launchWithHandoff(choice.tool, handoff, selected.cwd || selected.ref.cwd || null, [])
 }

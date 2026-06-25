@@ -1,4 +1,5 @@
 import { spawn } from 'child_process'
+import { existsSync } from 'fs'
 
 const INSTALL_HINTS = {
   claude: '  Install: npm i -g @anthropic-ai/claude-code',
@@ -7,12 +8,22 @@ const INSTALL_HINTS = {
   opencode: '  Install: see https://github.com/opencode-ai/opencode',
 }
 
+// Resume in the session's original working directory so the tool loads the
+// right project. Fall back to the current directory if that path is unknown
+// or no longer exists (e.g. the repo was moved or deleted).
+function resolveLaunchCwd(cwd) {
+  if (!cwd) return process.cwd()
+  if (existsSync(cwd)) return cwd
+  console.error(`\nNote: original session directory no longer exists:\n  ${cwd}\n  Launching in the current directory instead.`)
+  return process.cwd()
+}
+
 // Resume a session in its own tool using that tool's native resume command
 // (e.g. `claude --resume <id>`), in the session's original directory.
 export function launchNative(tool, args = [], cwd) {
   const child = spawn(tool, args, {
     stdio: 'inherit',
-    cwd: cwd || process.cwd(),
+    cwd: resolveLaunchCwd(cwd),
     shell: false,
   })
 
@@ -37,7 +48,7 @@ export function launchWithHandoff(tool, handoff, cwd, passthroughArgs = []) {
     : [...passthroughArgs, handoff]
   const opts = {
     stdio: 'inherit',
-    cwd: cwd || process.cwd(),
+    cwd: resolveLaunchCwd(cwd),
     // Detach from our process so the tool gets a clean TTY
     shell: false,
   }
