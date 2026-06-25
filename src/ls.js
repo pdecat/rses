@@ -1,5 +1,5 @@
 import { findCodexSessions, queryCodexSessions } from './parse-codex.js'
-import { findClaudeSessions } from './parse-claude.js'
+import { findClaudeSessions, peekClaudeSession } from './parse-claude.js'
 import { queryOpenCodeSessions } from './parse-opencode.js'
 import { findGeminiSessions, parseGeminiSession } from './parse-gemini.js'
 import { readFileSync } from 'fs'
@@ -131,11 +131,24 @@ export function lsSessions(tool, filterDir = null) {
         } catch {}
         return { id, date: formatDate(mtime), cwd, task }
       })
+    } else if (tool === 'claude') {
+      const sessions = findClaudeSessions(filterDir)
+      if (!sessions.length) {
+        console.log(`No ${tool} sessions found.`)
+        return
+      }
+      rows = sessions.slice(0, 20).map(({ path, mtime }) => {
+        const { cwd, task } = peekClaudeSession(path)
+        return {
+          id: basename(path, '.jsonl').replace(/^ses_/, ''),
+          date: formatDate(mtime),
+          cwd: cwd || '—',
+          task: (task || '(no task)').slice(0, 70),
+        }
+      })
     } else {
-      // Filesystem fallback (Claude, or Codex without SQLite)
-      const sessions = tool === 'codex'
-        ? findCodexSessions(filterDir)
-        : findClaudeSessions(filterDir)
+      // Filesystem fallback (Codex without SQLite)
+      const sessions = findCodexSessions(filterDir)
 
       if (!sessions.length) {
         console.log(`No ${tool} sessions found.`)
@@ -144,9 +157,7 @@ export function lsSessions(tool, filterDir = null) {
 
       rows = sessions.slice(0, 20).map(({ path, mtime }) => {
         const name = basename(path, '.jsonl')
-        const id = tool === 'codex'
-          ? name.split('-').slice(-5).join('-')
-          : name.replace('ses_', '')
+        const id = name.split('-').slice(-5).join('-')
         const date = formatDate(mtime)
         const cwd = extractCwd(path, tool) || '—'
         const task = extractFirstTask(path, tool)

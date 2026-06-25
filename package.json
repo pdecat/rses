@@ -1,7 +1,7 @@
 {
   "name": "rses-cli",
-  "version": "0.1.0",
-  "description": "Cross-resume between Claude Code, Codex CLI, and OpenCode sessions",
+  "version": "0.2.0",
+  "description": "Cross-resume between Claude Code, Codex CLI, Gemini CLI, and OpenCode sessions — run `rses` to browse every tool's sessions in one searchable picker",
   "bin": {
     "rses": "./bin/rses.js"
   },

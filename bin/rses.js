@@ -3,6 +3,7 @@
 import { program } from 'commander'
 import { resolve, basename } from 'path'
 import { homedir } from 'os'
+import { existsSync } from 'fs'
 
 function expandPath(p) {
   if (!p) return p
@@ -23,12 +24,15 @@ import {
   getLastGeminiSession
 } from '../src/parse-gemini.js'
 import { buildHandoff } from '../src/build-handoff.js'
-import { launchWithHandoff } from '../src/launch.js'
+import { launchWithHandoff, launchNative } from '../src/launch.js'
 import { lsSessions } from '../src/ls.js'
 import { pick } from '../src/picker.js'
+import { collectAllSessions } from '../src/all-sessions.js'
 
 const VALID_TOOLS = new Set(['claude', 'codex', 'gemini', 'opencode'])
 const TOOLS_LIST = "'claude', 'codex', 'gemini', or 'opencode'"
+const TOOL_ORDER = ['claude', 'codex', 'gemini', 'opencode']
+const TOOL_NAMES = { codex: 'Codex', claude: 'Claude', gemini: 'Gemini', opencode: 'OpenCode' }
 const ALIASES = {
   cc: 'claude', cl: 'claude', c: 'claude',
   cdx: 'codex', cx: 'codex', x: 'codex',
@@ -43,10 +47,17 @@ const RESUME_HINTS = {
   gemini: '  gemini --resume latest',
   opencode: '  opencode (select session from built-in picker)',
 }
+// Tools whose CLI can resume a specific session by id (used for the
+// same-tool option in the unified picker). OpenCode/Gemini have no
+// resume-by-id flag, so they're cross-resume-only.
+const NATIVE_RESUME = {
+  claude: (ref) => ['--resume', ref.id],
+  codex: (ref) => ['resume', ref.id],
+}
 
 program
   .name('rses')
-  .version('0.1.0')
+  .version('0.2.0')
   .description('Cross-resume between Claude Code, Codex CLI, Gemini CLI, and OpenCode sessions')
 
 program
@@ -79,11 +90,23 @@ program
     }
   })
 
-// ── Manual argv parsing for: rses <target> with <source> [id] ──────────────
+// ── Manual argv parsing ─────────────────────────────────────────────────────
 const args = process.argv.slice(2).map(resolve_alias)
 const withIdx = args.indexOf('with')
 
-if (withIdx === 1 && !['ls', 'export', '--help', '-h', '--version', '-V'].includes(args[0])) {
+// `rses` (or `rses --dir <path>` / `rses --turns <n>`) opens the unified,
+// fuzzy-searchable picker over every tool's sessions.
+const BROWSE_FLAGS = new Set(['--dir', '--turns'])
+const isBrowse = args.length === 0 || BROWSE_FLAGS.has(args[0])
+
+if (isBrowse) {
+  const opts = { dir: null, turns: '6' }
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--dir') opts.dir = args[++i]
+    else if (args[i] === '--turns') opts.turns = args[++i]
+  }
+  runBrowse(opts).catch(e => { console.error(e.message); process.exit(1) })
+} else if (withIdx === 1 && !['ls', 'export', '--help', '-h', '--version', '-V'].includes(args[0])) {
   const target = args[0]
   const source = args[withIdx + 1]
   const rest = args.slice(withIdx + 2)
@@ -399,18 +422,100 @@ async function runHandoff(target, source, id, opts) {
     return
   }
 
-  // Brief summary before launch
+  printLaunchSummary(handoff, target)
+  launchWithHandoff(target, handoff, null, opts.passthrough || [])
+}
+
+// ── Unified picker (`rses` with no target/source) ────────────────────────────
+
+function printLaunchSummary(handoff, target) {
   const lines = handoff.split('\n')
-  const cwdLine = lines.find(l => l.startsWith('CWD:'))
-  const taskLines = lines.slice(
-    lines.findIndex(l => l === 'Original task:') + 1,
-    lines.findIndex(l => l === 'Original task:') + 2
-  )
+  const cwdLine = lines.find(l => l.startsWith('Work in:'))
+  const taskIdx = lines.findIndex(l => l === 'Task:')
   console.log()
   if (cwdLine) console.log(`  ${cwdLine}`)
-  if (taskLines[0]) console.log(`  Task: "${taskLines[0].trim().slice(0, 80)}"`)
+  if (taskIdx >= 0 && lines[taskIdx + 1]) {
+    console.log(`  Task: "${lines[taskIdx + 1].trim().slice(0, 80)}"`)
+  }
   console.log()
-  console.log(`  Launching ${target}...\n`)
+  console.log(`  Launching ${TOOL_NAMES[target] || target}...\n`)
+}
 
-  launchWithHandoff(target, handoff, null, opts.passthrough || [])
+// Build a handoff from an already-resolved session reference (no re-discovery).
+function buildFromRef(source, ref, turns) {
+  let parsed
+  try {
+    if (source === 'codex') {
+      const fp = ref.filePath
+        || (ref.rolloutPath && existsSync(ref.rolloutPath) ? ref.rolloutPath : findCodexSessionById(ref.id))
+      if (!fp) throw new Error('session file not found')
+      parsed = parseCodexSession(fp); parsed.filePath = fp
+    } else if (source === 'claude') {
+      parsed = parseClaudeSession(ref.filePath); parsed.filePath = ref.filePath
+    } else if (source === 'gemini') {
+      parsed = parseGeminiSession(ref.filePath); parsed.filePath = ref.filePath
+    } else if (source === 'opencode') {
+      parsed = parseOpenCodeSession(ref.sessionId)
+    } else {
+      throw new Error(`unknown source ${source}`)
+    }
+  } catch (e) {
+    console.error(`Failed to parse ${TOOL_NAMES[source] || source} session: ${e.message}`)
+    process.exit(1)
+  }
+  parsed.turns = parsed.turns.slice(-turns * 2)
+  return buildHandoff(source, parsed)
+}
+
+async function runBrowse(opts) {
+  const filterDir = opts.dir ? expandPath(opts.dir) : null
+  const turns = parseInt(opts.turns || '6', 10)
+  const home = process.env.HOME || ''
+  const shorten = p => p ? p.replace(home, '~') : '—'
+
+  const sessions = collectAllSessions({ filterDir })
+  if (!sessions.length) {
+    console.error('No sessions found' + (filterDir ? ` in ${filterDir}` : '') + '.')
+    process.exit(1)
+  }
+
+  const TOOL_W = 8, DATE_W = 16, CWD_W = 28
+  const padCol = (s, w) => {
+    s = (s == null ? '' : String(s)).replace(/\s+/g, ' ').trim() || '—'
+    return s.length > w ? s.slice(0, w - 1) + '…' : s.padEnd(w)
+  }
+
+  const items = sessions.map(s => {
+    const date = s.dateMs ? new Date(s.dateMs).toISOString().slice(0, 16).replace('T', ' ') : '—'
+    const display = `${padCol(TOOL_NAMES[s.tool] || s.tool, TOOL_W)}  ${padCol(date, DATE_W)}  ${padCol(shorten(s.cwd), CWD_W)}  ${s.task || '(no title)'}`
+    return { display, value: s }
+  })
+
+  const selected = await pick(items, 'All sessions — type to filter · ↑↓ move · Enter select:')
+  if (!selected) { console.error('Cancelled.'); process.exit(0) }
+
+  // Choose where to continue: cross-resume into another tool, or (where the
+  // CLI supports it) resume natively in the tool the session came from.
+  const source = selected.tool
+  const targetItems = []
+  for (const t of TOOL_ORDER) {
+    if (t === source) continue
+    targetItems.push({ display: `→  Continue in ${TOOL_NAMES[t]}`, value: { kind: 'handoff', tool: t } })
+  }
+  if (NATIVE_RESUME[source]) {
+    targetItems.push({ display: `↻  Resume natively in ${TOOL_NAMES[source]}`, value: { kind: 'native', tool: source } })
+  }
+
+  const choice = await pick(targetItems, `Continue this ${TOOL_NAMES[source]} session in:`)
+  if (!choice) { console.error('Cancelled.'); process.exit(0) }
+
+  if (choice.kind === 'native') {
+    launchNative(choice.tool, NATIVE_RESUME[source](selected.ref), selected.ref.cwd)
+    return
+  }
+
+  const handoff = buildFromRef(source, selected.ref, turns)
+  if (!handoff) { console.error('Could not build handoff.'); process.exit(1) }
+  printLaunchSummary(handoff, choice.tool)
+  launchWithHandoff(choice.tool, handoff, null, [])
 }

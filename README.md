@@ -4,10 +4,16 @@
 Pick up where one AI coding agent left off — in another.
 
 ```
+rses
+```
+
+Run it with no arguments to browse **every tool's sessions in one searchable picker**. Type to filter across tool, directory, and task; pick a session, then pick where to continue it.
+
+```
 rses claude with codex --last
 ```
 
-That's it. Claude launches with full context from your last Codex session: the original task, git diff, conversation history, and a pointer to the session file for deep-dive.
+Or go straight to a handoff: Claude launches with full context from your last Codex session — the original task, git diff, conversation history, and a pointer to the session file for deep-dive.
 
 Works in all 12 directions between Claude Code, Codex CLI, Gemini CLI, and OpenCode.
 
@@ -45,6 +51,17 @@ rses gemini with codex --last
 The receiving model is oriented on turn one. No re-explaining.
 
 ## Commands
+
+### Browse all sessions (no arguments)
+
+```bash
+rses                  # unified, searchable picker across all four tools
+rses --dir .          # only sessions from the current directory
+```
+
+- **Type** to filter the merged list — each space-separated term must appear as a substring of the tool name, directory, or task (terms are AND-ed).
+- **↑/↓** (or Ctrl-P / Ctrl-N) to move, **Enter** to pick, **Esc** to clear the filter / cancel.
+- After selecting a session, choose where to continue it: hand off to another tool, or resume natively in the same tool where the CLI supports it (Claude, Codex).
 
 ### Handoff (main command)
 
@@ -115,7 +132,7 @@ rses opencode with claude --last --provider anthropic
 
 | Tool | Source | Upgrade-safe |
 |------|--------|-------------|
-| Claude Code | `~/.claude/transcripts/ses_*.jsonl` | Reads only `user`/`assistant` types |
+| Claude Code | `~/.claude/projects/<dir>/<uuid>.jsonl` (legacy `~/.claude/transcripts/ses_*.jsonl` fallback) | Reads only `user`/`assistant` types; pulls `cwd`/`gitBranch` from the transcript |
 | Codex CLI | `~/.codex/state_*.sqlite` (auto-discovers version) + JSONL fallback | Handles both 2025 and 2026 schemas |
 | Gemini CLI | `~/.gemini/tmp/<projectHash>/chats/session-*.jsonl` (legacy `.json` fallback) | Reads only `user`/`gemini` records; `$set` / `$rewindTo` honored |
 | OpenCode | `~/.local/share/opencode/opencode.db` | Single JOIN query, reads stable columns only |
