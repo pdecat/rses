@@ -3,6 +3,7 @@ import { queryCodexSessions, findCodexSessions } from './parse-codex.js'
 import { findClaudeSessions, peekClaudeSession } from './parse-claude.js'
 import { queryOpenCodeSessions } from './parse-opencode.js'
 import { findGeminiSessions, parseGeminiSession } from './parse-gemini.js'
+import { findAgySessions, peekAgySession } from './parse-agy.js'
 
 // How many sessions to pull per tool before merging. The picker's fuzzy search
 // filters the merged list, so this just bounds startup cost.
@@ -73,6 +74,23 @@ export function collectAllSessions({ filterDir = null } = {}) {
         task,
         dateMs: mtime,
         ref: { tool: 'gemini', filePath: path, cwd },
+      })
+    }
+  } catch {}
+
+  // ── Antigravity (JSONL transcripts under ~/.gemini/antigravity-cli/brain) ──
+  try {
+    for (const { path, mtime } of findAgySessions(filterDir).slice(0, PER_TOOL)) {
+      const { cwd, task } = peekAgySession(path)
+      const parts = path.split('/')
+      const id = parts[parts.length - 4]
+      items.push({
+        tool: 'agy',
+        id,
+        cwd,
+        task,
+        dateMs: mtime,
+        ref: { tool: 'agy', filePath: path, id, cwd },
       })
     }
   } catch {}

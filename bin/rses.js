@@ -23,21 +23,26 @@ import {
   parseGeminiSession, findGeminiSessions, findGeminiSessionById,
   getLastGeminiSession
 } from '../src/parse-gemini.js'
+import {
+  parseAgySession, findAgySessions, findAgySessionById,
+  getLastAgySession, peekAgySession
+} from '../src/parse-agy.js'
 import { buildHandoff } from '../src/build-handoff.js'
 import { launchWithHandoff, launchNative } from '../src/launch.js'
 import { lsSessions } from '../src/ls.js'
 import { pick } from '../src/picker.js'
 import { collectAllSessions } from '../src/all-sessions.js'
 
-const VALID_TOOLS = new Set(['claude', 'codex', 'gemini', 'opencode'])
-const TOOLS_LIST = "'claude', 'codex', 'gemini', or 'opencode'"
-const TOOL_ORDER = ['claude', 'codex', 'gemini', 'opencode']
-const TOOL_NAMES = { codex: 'Codex', claude: 'Claude', gemini: 'Gemini', opencode: 'OpenCode' }
+const VALID_TOOLS = new Set(['claude', 'codex', 'gemini', 'opencode', 'agy'])
+const TOOLS_LIST = "'claude', 'codex', 'gemini', 'opencode', or 'agy'"
+const TOOL_ORDER = ['claude', 'codex', 'gemini', 'opencode', 'agy']
+const TOOL_NAMES = { codex: 'Codex', claude: 'Claude', gemini: 'Gemini', opencode: 'OpenCode', agy: 'Antigravity' }
 const ALIASES = {
   cc: 'claude', cl: 'claude', c: 'claude',
   cdx: 'codex', cx: 'codex', x: 'codex',
   gm: 'gemini', gem: 'gemini', g: 'gemini',
   oc: 'opencode', o: 'opencode',
+  agy: 'agy', ag: 'agy', a: 'agy',
   w: 'with',
 }
 function resolve_alias(s) { return ALIASES[s] || s }
@@ -46,6 +51,7 @@ const RESUME_HINTS = {
   codex: '  codex resume',
   gemini: '  gemini --resume latest',
   opencode: '  opencode (select session from built-in picker)',
+  agy: '  agy --conversation <id>',
 }
 // Tools whose CLI can resume a specific session by id (used for the
 // same-tool option in the unified picker). OpenCode/Gemini have no
@@ -53,6 +59,7 @@ const RESUME_HINTS = {
 const NATIVE_RESUME = {
   claude: (ref) => ['--resume', ref.id],
   codex: (ref) => ['resume', ref.id],
+  agy: (ref) => ['--conversation', ref.id],
 }
 
 program
@@ -80,7 +87,7 @@ program
   .option('--dir <path>', 'Filter by working directory')
   .action((rawTool, opts) => {
     const tool = rawTool ? resolve_alias(rawTool) : null
-    const tools = tool ? [tool] : ['codex', 'claude', 'gemini', 'opencode']
+    const tools = tool ? [tool] : ['codex', 'claude', 'gemini', 'opencode', 'agy']
     for (const t of tools) {
       if (!VALID_TOOLS.has(t)) {
         console.error(`Unknown tool: ${t}. Use ${TOOLS_LIST}.`)
@@ -229,6 +236,24 @@ async function pickSession(source, filterDir) {
 
     return pick(items, 'Select a Gemini session:')
 
+  } else if (source === 'agy') {
+    const files = findAgySessions(filterDir)
+    if (!files.length) return null
+
+    const items = files.slice(0, 30).map(({ path, mtime }) => {
+      const date = new Date(mtime).toISOString().slice(0, 16).replace('T', ' ')
+      let cwd = '—'
+      let task = '(no task)'
+      try {
+        const p = peekAgySession(path)
+        if (p.cwd) cwd = shorten(p.cwd)
+        if (p.task) task = p.task
+      } catch {}
+      return { display: makeDisplay(date, cwd, task), value: path }
+    })
+
+    return pick(items, 'Select an Antigravity session:')
+
   } else {
     const files = findClaudeSessions(filterDir)
     if (!files.length) return null
@@ -357,6 +382,30 @@ async function resolveAndBuildAsync(source, id, opts) {
       process.exit(1)
     }
 
+  } else if (source === 'agy') {
+    if (opts.last) {
+      filePath = getLastAgySession(filterDir)
+      if (!filePath) {
+        console.error('No Antigravity sessions found' + (filterDir ? ` in ${filterDir}` : '') + '.')
+        process.exit(1)
+      }
+    } else if (id) {
+      filePath = findAgySessionById(id)
+      if (!filePath) {
+        console.error(`Antigravity session not found: ${id}`)
+        console.error('Tip: run `rses ls agy` to list sessions.')
+        process.exit(1)
+      }
+    } else {
+      filePath = await pickSession('agy', filterDir)
+      if (!filePath) { console.error('Cancelled.'); process.exit(0) }
+    }
+
+    try { parsed = parseAgySession(filePath); parsed.filePath = filePath } catch (e) {
+      console.error(`Failed to parse Antigravity session: ${e.message}`)
+      process.exit(1)
+    }
+
   } else {
     console.error(`Unknown source tool: ${source}. Use ${TOOLS_LIST}.`)
     process.exit(1)
@@ -392,6 +441,11 @@ function resolveAndBuild(source, id, opts) {
     filePath = opts.last ? getLastGeminiSession(filterDir) : findGeminiSessionById(id)
     if (!filePath) { console.error(`Gemini session not found: ${id}`); process.exit(1) }
     parsed = parseGeminiSession(filePath); parsed.filePath = filePath
+  } else if (source === 'agy') {
+    if (!id && !opts.last) { console.error('export requires a session ID.'); process.exit(1) }
+    filePath = opts.last ? getLastAgySession(filterDir) : findAgySessionById(id)
+    if (!filePath) { console.error(`Antigravity session not found: ${id}`); process.exit(1) }
+    parsed = parseAgySession(filePath); parsed.filePath = filePath
   } else {
     console.error(`Unknown source: ${source}. Use ${TOOLS_LIST}.`)
     process.exit(1)
@@ -454,6 +508,8 @@ function buildFromRef(source, ref, turns) {
       parsed = parseClaudeSession(ref.filePath); parsed.filePath = ref.filePath
     } else if (source === 'gemini') {
       parsed = parseGeminiSession(ref.filePath); parsed.filePath = ref.filePath
+    } else if (source === 'agy') {
+      parsed = parseAgySession(ref.filePath); parsed.filePath = ref.filePath
     } else if (source === 'opencode') {
       parsed = parseOpenCodeSession(ref.sessionId)
     } else {

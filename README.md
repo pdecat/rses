@@ -1,6 +1,6 @@
 # rses
 
-**Cross-resume between Claude Code, Codex CLI, Gemini CLI, and OpenCode.**
+**Cross-resume between Claude Code, Codex CLI, Gemini CLI, OpenCode, and Antigravity CLI.**
 Pick up where one AI coding agent left off — in another.
 
 ```
@@ -15,7 +15,7 @@ rses claude with codex --last
 
 Or go straight to a handoff: Claude launches with full context from your last Codex session — the original task, git diff, conversation history, and a pointer to the session file for deep-dive.
 
-Works in all 12 directions between Claude Code, Codex CLI, Gemini CLI, and OpenCode.
+Works in all 20 directions between Claude Code, Codex CLI, Gemini CLI, OpenCode, and Antigravity CLI.
 
 ## Install
 
@@ -39,6 +39,8 @@ rses opencode with codex --last
 rses claude with opencode --last
 rses claude with gemini --last
 rses gemini with codex --last
+rses agy with claude --last
+rses claude with agy --last
 ```
 
 ## What it does
@@ -83,6 +85,7 @@ rses ls codex              # just Codex
 rses ls claude             # just Claude
 rses ls gemini             # just Gemini
 rses ls opencode           # just OpenCode
+rses ls agy                # just Antigravity
 rses ls codex --dir .      # filter by working directory
 ```
 
@@ -103,6 +106,7 @@ Power-user shorthand — type less, ship faster:
 | `cdx`, `cx`, `x` | `codex` |
 | `gm`, `gem`, `g` | `gemini` |
 | `oc`, `o` | `opencode` |
+| `agy`, `ag`, `a` | `agy` |
 | `w` | `with` |
 
 ```bash
@@ -136,13 +140,14 @@ rses opencode with claude --last --provider anthropic
 | Codex CLI | `~/.codex/state_*.sqlite` (auto-discovers version) + JSONL fallback | Handles both 2025 and 2026 schemas |
 | Gemini CLI | `~/.gemini/tmp/<projectHash>/chats/session-*.jsonl` (legacy `.json` fallback) | Reads only `user`/`gemini` records; `$set` / `$rewindTo` honored |
 | OpenCode | `~/.local/share/opencode/opencode.db` | Single JOIN query, reads stable columns only |
+| Antigravity | `~/.gemini/antigravity-cli/brain/<uuid>/.system_generated/logs/transcript.jsonl` | Reads only `USER_INPUT` and `PLANNER_RESPONSE` records; discovers CWD from history, sqlite DB, or tool calls |
 
 All parsers are read-only and wrapped in try/catch — if a tool changes its format, rses degrades gracefully instead of crashing.
 
 ## Requirements
 
 - **Node.js 22+** (for built-in `node:sqlite`)
-- At least one of: [Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [OpenCode](https://github.com/opencode-ai/opencode)
+- At least one of: [Claude Code](https://docs.anthropic-ai/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [OpenCode](https://github.com/opencode-ai/opencode), [Antigravity CLI](https://github.com/google-antigravity/antigravity-cli) (closed source)
 - macOS or Linux (Windows support planned)
 
 ## License

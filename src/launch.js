@@ -6,6 +6,7 @@ const INSTALL_HINTS = {
   codex: '  Install: npm i -g @openai/codex',
   gemini: '  Install: npm i -g @google/gemini-cli',
   opencode: '  Install: see https://github.com/opencode-ai/opencode',
+  agy: '  Install: Google Antigravity (closed source)',
 }
 
 // Resume in the session's original working directory so the tool loads the
@@ -42,10 +43,15 @@ export function launchNative(tool, args = [], cwd) {
 }
 
 export function launchWithHandoff(tool, handoff, cwd, passthroughArgs = []) {
-  // opencode uses `opencode run <message>`, claude/codex accept prompt as bare arg
-  const args = tool === 'opencode'
-    ? ['run', ...passthroughArgs, handoff]
-    : [...passthroughArgs, handoff]
+  // opencode uses `opencode run <message>`, agy uses `agy -i <message>`, claude/codex accept prompt as bare arg
+  let args
+  if (tool === 'opencode') {
+    args = ['run', ...passthroughArgs, handoff]
+  } else if (tool === 'agy') {
+    args = ['-i', ...passthroughArgs, handoff]
+  } else {
+    args = [...passthroughArgs, handoff]
+  }
   const opts = {
     stdio: 'inherit',
     cwd: resolveLaunchCwd(cwd),

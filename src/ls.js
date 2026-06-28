@@ -2,6 +2,7 @@ import { findCodexSessions, queryCodexSessions } from './parse-codex.js'
 import { findClaudeSessions, peekClaudeSession } from './parse-claude.js'
 import { queryOpenCodeSessions } from './parse-opencode.js'
 import { findGeminiSessions, parseGeminiSession } from './parse-gemini.js'
+import { findAgySessions, peekAgySession } from './parse-agy.js'
 import { readFileSync } from 'fs'
 import { basename } from 'path'
 
@@ -130,6 +131,18 @@ export function lsSessions(tool, filterDir = null) {
           if (p.task) task = p.task.slice(0, 70)
         } catch {}
         return { id, date: formatDate(mtime), cwd, task }
+      })
+    } else if (tool === 'agy') {
+      const sessions = findAgySessions(filterDir)
+      if (!sessions.length) {
+        console.log(`No ${tool} sessions found.`)
+        return
+      }
+      rows = sessions.slice(0, 20).map(({ path, mtime }) => {
+        const { cwd, task } = peekAgySession(path)
+        const parts = path.split('/')
+        const id = parts[parts.length - 4]
+        return { id, date: formatDate(mtime), cwd, task: (task || '(no task)').slice(0, 70) }
       })
     } else if (tool === 'claude') {
       const sessions = findClaudeSessions(filterDir)
