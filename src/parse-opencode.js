@@ -50,6 +50,34 @@ export function queryOpenCodeSessions({ limit = 30, filterDir = null } = {}) {
   }
 }
 
+// Concatenated (capped) message text per session for content search, in one
+// query instead of one parse per session. Returns Map(sessionId -> text).
+export function queryOpenCodeContent(cap = 64 * 1024) {
+  const db = getDb()
+  if (!db) return new Map()
+  try {
+    const rows = db.prepare(`
+      SELECT m.session_id AS sid, p.data AS data
+      FROM message m
+      JOIN part p ON p.message_id = m.id
+      ORDER BY m.session_id, m.time_created ASC, p.time_created ASC
+    `).all()
+    db.close()
+    const map = new Map()
+    for (const r of rows) {
+      const cur = map.get(r.sid) || ''
+      if (cur.length >= cap) continue
+      let text = ''
+      try { const pd = JSON.parse(r.data); if (pd.type === 'text' && pd.text) text = pd.text } catch {}
+      if (text) map.set(r.sid, cur + text + '\n')
+    }
+    return map
+  } catch {
+    try { db.close() } catch {}
+    return new Map()
+  }
+}
+
 // ── Session parsing ─────────────────────────────────────────────────────────
 
 export function parseOpenCodeSession(sessionId) {

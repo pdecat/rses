@@ -7,7 +7,7 @@ Pick up where one AI coding agent left off — in another.
 rses
 ```
 
-Run it with no arguments to browse **every tool's sessions in one searchable picker**. Type to filter across tool, directory, and task; pick a session, then pick where to continue it.
+Run it with no arguments to browse **every tool's sessions in one searchable picker**. Type to filter across tool, directory, task, and conversation content; pick a session, then pick where to continue it.
 
 ```
 rses claude with codex --last
@@ -57,11 +57,12 @@ The receiving model is oriented on turn one. No re-explaining.
 ### Browse all sessions (no arguments)
 
 ```bash
-rses                  # unified, searchable picker across all four tools
+rses                  # unified, searchable picker across every tool
 rses --dir .          # only sessions from the current directory
 ```
 
-- **Type** to filter the merged list — each space-separated term must appear as a substring of the tool name, directory, or task (terms are AND-ed).
+- Lists **all** of your sessions (every tool, not just recent ones), newest first.
+- **Type** to filter — each space-separated term must appear as a substring of the tool name, directory, task, or **conversation content** (terms are AND-ed). So you can find a session by something said mid-conversation, not just its first message.
 - **↑/↓** (or Ctrl-P / Ctrl-N) to move, **Enter** to pick, **Esc** to clear the filter / cancel.
 - After selecting a session, choose where to continue it: hand off to another tool, or resume natively in the same tool where the CLI supports it (Claude, Codex).
 

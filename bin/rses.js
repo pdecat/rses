@@ -173,7 +173,8 @@ async function pickSession(source, filterDir) {
   }
 
   function makeDisplay(date, cwd, title) {
-    return `${padCol(date, DATE_W)}  ${padCol(cwd, CWD_W)}  ${title || '(no title)'}`
+    const t = (title || '(no title)').replace(/\s+/g, ' ').trim() || '(no title)'
+    return `${padCol(date, DATE_W)}  ${padCol(cwd, CWD_W)}  ${t}`
   }
 
   if (source === 'codex') {
@@ -529,7 +530,10 @@ async function runBrowse(opts) {
   const home = process.env.HOME || ''
   const shorten = p => p ? p.replace(home, '~') : '—'
 
+  const scanning = process.stderr.isTTY
+  if (scanning) process.stderr.write('Scanning sessions…')
   const sessions = collectAllSessions({ filterDir })
+  if (scanning) process.stderr.write('\r\x1b[2K')
   if (!sessions.length) {
     console.error('No sessions found' + (filterDir ? ` in ${filterDir}` : '') + '.')
     process.exit(1)
@@ -543,8 +547,9 @@ async function runBrowse(opts) {
 
   const items = sessions.map(s => {
     const date = s.dateMs ? new Date(s.dateMs).toISOString().slice(0, 16).replace('T', ' ') : '—'
-    const display = `${padCol(TOOL_NAMES[s.tool] || s.tool, TOOL_W)}  ${padCol(date, DATE_W)}  ${padCol(shorten(s.cwd), CWD_W)}  ${s.task || '(no title)'}`
-    return { display, value: s }
+    const task = (s.task || '(no title)').replace(/\s+/g, ' ').trim() || '(no title)'
+    const display = `${padCol(TOOL_NAMES[s.tool] || s.tool, TOOL_W)}  ${padCol(date, DATE_W)}  ${padCol(shorten(s.cwd), CWD_W)}  ${task}`
+    return { display, value: s, search: s.search }
   })
 
   const selected = await pick(items, 'All sessions — type to filter · ↑↓ move · Enter select:')

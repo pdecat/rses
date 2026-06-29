@@ -44,37 +44,65 @@ function clearLines(count) {
 // the most relevant rows sort first. Returns -1 when the token isn't present.
 const BOUNDARY = /[\s/_\-.:]/
 function tokenScore(token, text) {
-  let best = -1
+  let best = -1, count = 0
   for (let idx = text.indexOf(token); idx !== -1; idx = text.indexOf(token, idx + 1)) {
+    count++
     let s = 10 // base for a substring hit
     if (idx === 0) s += 8 // start of line (e.g. the tool column)
     else if (BOUNDARY.test(text[idx - 1])) s += 5 // word boundary
     s += Math.max(0, 5 - Math.floor(idx / 10)) // earlier in the row is slightly better
     if (s > best) best = s
   }
-  return best
+  if (best < 0) return -1
+  return best + Math.min(count - 1, 5) // sessions that mention the term more rank higher
 }
 
-// Whitespace-separated tokens are AND-ed and order-independent, so
-// "claude rses" matches a row regardless of which column each word is in.
-export function matchScore(query, text) {
-  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean)
-  if (!tokens.length) return 0
-  const t = text.toLowerCase()
+// Context around the first match of the query's first token, for the preview
+// line — so content matches (buried in conversation text, not shown in the row)
+// are explained. Operates on the lowercased `search` blob; case is cosmetic here.
+export function matchSnippet(item, query) {
+  const hay = item && item.search
+  if (!hay) return ''
+  const tok = query.toLowerCase().split(/\s+/).filter(Boolean)[0]
+  if (!tok) return ''
+  const idx = hay.indexOf(tok)
+  if (idx < 0) return ''
+  const start = Math.max(0, idx - 40)
+  const s = hay.slice(start, idx + tok.length + 80).replace(/\s+/g, ' ').trim()
+  return (start > 0 ? '…' : '') + s + '…'
+}
+
+// Tokens (already lowercased) are AND-ed and order-independent, so "claude rses"
+// matches regardless of which part of the haystack each word lands in. Text must
+// already be lowercased — callers reuse a per-item lowercased blob rather than
+// re-lowercasing megabytes of session content on every keystroke.
+function scoreLower(tokens, textLower) {
   let total = 0
   for (const tok of tokens) {
-    const s = tokenScore(tok, t)
+    const s = tokenScore(tok, textLower)
     if (s < 0) return -1
     total += s
   }
   return total
 }
 
+export function matchScore(query, text) {
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (!tokens.length) return 0
+  return scoreLower(tokens, text.toLowerCase())
+}
+
+// Filters against each item's `search` blob (lowercased metadata + conversation
+// text) when present, else its display string. So results cover anything said in
+// a session, not just what's shown in the row.
 export function filterItems(items, query) {
   if (!query.trim()) return items.slice()
+  const tokens = query.toLowerCase().split(/\s+/).filter(Boolean)
+  if (!tokens.length) return items.slice()
   const scored = []
   for (let i = 0; i < items.length; i++) {
-    const s = matchScore(query, stripAnsi(items[i].display))
+    const hay = items[i].search != null ? items[i].search : stripAnsi(items[i].display).toLowerCase()
+    const s = scoreLower(tokens, hay)
     if (s >= 0) scored.push({ item: items[i], i, s })
   }
   scored.sort((a, b) => b.s - a.s || a.i - b.i) // best score, ties keep original (recency) order
@@ -104,6 +132,16 @@ function render(filtered, cursor, maxVisible, query, total) {
     }
   }
 
+  // Preview where the query matched in the highlighted row — essential when the
+  // hit is in conversation content the row itself doesn't show.
+  if (filtered.length && query.trim()) {
+    const snip = matchSnippet(filtered[cursor], query)
+    if (snip) {
+      out.push(`\x1b[2m  ↳ ${truncate(snip, termCols - 6)}\x1b[0m`)
+      totalLines += 1
+    }
+  }
+
   const count = filtered.length === total ? `${total}` : `${filtered.length}/${total}`
   const pos = filtered.length ? `${cursor + 1}·` : ''
   out.push(`\x1b[2m  ${pos}${count}  type to filter · ↑↓ · Enter · Esc\x1b[0m`)
@@ -124,7 +162,7 @@ export function pick(items, header) {
     }
 
     const termRows = process.stdout.rows || 24
-    const maxVisible = Math.max(3, Math.min(items.length, termRows - 6))
+    const maxVisible = Math.max(3, Math.min(items.length, termRows - 7)) // leave room for preview + footer
     let query = ''
     let filtered = items.slice()
     let cursor = 0

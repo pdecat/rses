@@ -35,6 +35,42 @@ function isNoise(obj) {
   return false
 }
 
+// Attachment types that are injected harness state, not user/work content — the
+// deferred-tool list, skill/agent/mcp catalogs, task reminders, permission lists,
+// output style, hook output, repeated project memory. Indexing these floods
+// search (e.g. "EnterWorktree" in deferred_tools_delta matched ~half of sessions).
+const INJECTED_ATTACHMENT_TYPES = new Set([
+  'deferred_tools_delta', 'mcp_instructions_delta', 'agent_listing_delta',
+  'command_permissions', 'output_style', 'task_reminder', 'date_change',
+  'skill_listing', 'plan_mode', 'plan_mode_exit', 'diagnostics',
+  'hook_success', 'hook_non_blocking_error', 'nested_memory',
+])
+// Human-readable fields on the remaining attachment types (file/edited_text_file/
+// queued_command/plan_file_reference/…) — i.e. the content you actually pasted,
+// attached, or queued.
+const ATTACHMENT_TEXT_FIELDS = ['content', 'snippet', 'prompt', 'planContent', 'text', 'filename', 'displayPath']
+
+function attachmentText(a) {
+  if (!a || typeof a !== 'object' || INJECTED_ATTACHMENT_TYPES.has(a.type)) return ''
+  let out = ''
+  for (const f of ATTACHMENT_TEXT_FIELDS) {
+    if (typeof a[f] === 'string' && a[f]) out += a[f] + '\n'
+  }
+  return out
+}
+
+// Strip harness-injected blocks (system reminders, command wrappers) from a
+// message so search indexes what was actually said — not, e.g., the deferred-tool
+// list that would make every session match "worktree".
+function stripInjected(text) {
+  if (!text) return ''
+  return text
+    .replace(/<system-reminder>[\s\S]*?<\/system-reminder>/gi, ' ')
+    .replace(/<command-[a-z-]*>[\s\S]*?<\/command-[a-z-]*>/gi, ' ')
+    .replace(/<local-command-[a-z-]*>[\s\S]*?<\/local-command-[a-z-]*>/gi, ' ')
+    .trim()
+}
+
 export function parseClaudeSession(filePath) {
   const raw = readFileSync(filePath, 'utf8')
   const lines = raw.split('\n')
@@ -54,7 +90,7 @@ export function parseClaudeSession(filePath) {
     if (obj.type !== 'user' && obj.type !== 'assistant') continue
     if (isNoise(obj)) continue
 
-    const text = extractContent(recordContent(obj))
+    const text = stripInjected(extractContent(recordContent(obj)))
     if (text) turns.push({ role: obj.type, text })
   }
 
@@ -79,12 +115,49 @@ export function peekClaudeSession(filePath) {
     if (!cwd && obj.cwd) cwd = obj.cwd
     if (!branch && obj.gitBranch) branch = obj.gitBranch
     if (!task && obj.type === 'user' && !isNoise(obj)) {
-      const t = extractContent(recordContent(obj))
+      const t = stripInjected(extractContent(recordContent(obj)))
       if (t) task = t
     }
     if (cwd && task) break
   }
   return { cwd, branch, task }
+}
+
+// Read a session's metadata AND a (capped) blob of its conversation text for
+// content search — including attachment payloads, where pasted snippets, file
+// references, and command output live (so e.g. "worktree" mentioned mid-session
+// is findable even when it isn't the first message). One pass, one file read.
+export function indexClaudeSession(filePath, cap = 64 * 1024) {
+  let cwd = null, branch = null, task = '', content = ''
+  let raw
+  try { raw = readFileSync(filePath, 'utf8') } catch { return { cwd, branch, task, content } }
+
+  for (const line of raw.split('\n')) {
+    if (!line.trim() || line.length > 1000000) continue // skip blanks + huge snapshot/image lines
+    if (!/"type":"(user|assistant|attachment)"/.test(line)) continue
+    let obj
+    try { obj = JSON.parse(line) } catch { continue }
+
+    if (!cwd && obj.cwd) cwd = obj.cwd
+    if (!branch && obj.gitBranch) branch = obj.gitBranch
+    if (content.length >= cap) continue
+
+    if (obj.type === 'attachment') {
+      // Pasted/attached/queued content — minus injected harness state.
+      const t = stripInjected(attachmentText(obj.attachment))
+      if (t) content += t + '\n'
+      continue
+    }
+
+    if (isNoise(obj)) continue
+    const text = stripInjected(extractContent(recordContent(obj)))
+    if (text) {
+      if (!task && obj.type === 'user') task = text
+      content += text + '\n'
+    }
+  }
+
+  return { cwd, branch, task, content: content.slice(0, cap) }
 }
 
 function walk(dir) {
